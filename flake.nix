@@ -23,6 +23,7 @@
           buildInputs = [
             # Rust
             rust-bin.stable.latest.default
+            rust-analyzer
 
             # misc. libraries
             openssl
