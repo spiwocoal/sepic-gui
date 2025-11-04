@@ -1,6 +1,9 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
-use crate::{PWMPreview, serialcomms::get_serial_ports};
+use crate::{
+    PWMPreview,
+    serialcomms::{attempt_handshake, get_serial_ports},
+};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
 
@@ -57,7 +60,7 @@ impl eframe::App for SepicApp {
 
             let prev_port = self.port_info.clone();
 
-            ui.add(PWMPreview::new(self.duty_cycle, 4));
+            // ui.add(PWMPreview::new(self.duty_cycle, 4));
 
             ui.horizontal(|ui| {
                 if ui.add(egui::Button::new("⟲")).clicked() {
@@ -94,6 +97,7 @@ impl eframe::App for SepicApp {
                 {
                     debug!("Se seleccionó nuevo puerto serial ({})", port.port_name);
                     self.serial_port = serialport::new(&port.port_name, self.baudrate)
+                        .timeout(Duration::from_millis(500))
                         .open()
                         .map_or_else(
                             |e| {
@@ -101,7 +105,15 @@ impl eframe::App for SepicApp {
                                 error!("No se pudo abrir el puerto {}: {:?}", port.port_name, e);
                                 None
                             },
-                            Some,
+                            |port| {
+                                attempt_handshake(port).map_or_else(
+                                    |e| {
+                                        error!("Falló el handshake con el dispositivo: {e:?}");
+                                        None
+                                    },
+                                    Some,
+                                )
+                            },
                         );
                 }
             });
