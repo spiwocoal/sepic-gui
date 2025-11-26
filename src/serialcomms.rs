@@ -7,6 +7,14 @@ use serialport::{SerialPort, SerialPortInfo};
 const ACK: [u8; 1] = [0x06];
 const NACK: [u8; 1] = [0x15];
 
+pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
+    serialport::available_ports()
+        .expect("Ocurrió un error al obtener la lista de puertos disponibles")
+        .into_iter()
+        .map(Rc::new)
+        .collect()
+}
+
 pub fn attempt_handshake(mut port: Box<dyn SerialPort>) -> Result<Box<dyn SerialPort>> {
     let mut buf = [0u8; 64];
 
@@ -23,14 +31,6 @@ pub fn attempt_handshake(mut port: Box<dyn SerialPort>) -> Result<Box<dyn Serial
         "El dispositivo no responde correctamente, {:x?}",
         buf
     ))
-}
-
-pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
-    serialport::available_ports()
-        .expect("Ocurrió un error al obtener la lista de puertos disponibles")
-        .into_iter()
-        .map(Rc::new)
-        .collect()
 }
 
 pub fn set_duty(port: &mut Box<dyn SerialPort>, duty_cycle: f32) -> Result<()> {

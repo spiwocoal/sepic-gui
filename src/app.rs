@@ -47,12 +47,8 @@ impl SepicApp {
     }
 }
 
-impl eframe::App for SepicApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let prev_port = self.port_info.clone();
-        let prev_duty = self.duty_cycle;
-        let prev_freq = self.frequency;
-
+impl SepicApp {
+    fn update_menubar(ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("Archivo", |ui| {
@@ -65,6 +61,16 @@ impl eframe::App for SepicApp {
                 egui::widgets::global_theme_preference_buttons(ui);
             });
         });
+    }
+}
+
+impl eframe::App for SepicApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let prev_port = self.port_info.clone();
+        let prev_duty = self.duty_cycle;
+        let prev_freq = self.frequency;
+
+        Self::update_menubar(ctx, _frame);
 
         egui::SidePanel::left("Ajustes").show(ctx, |ui| {
             ui.heading("SEPIC");
@@ -150,6 +156,21 @@ impl eframe::App for SepicApp {
                 });
             });
         });
+
+        if let Some(serial_port) = self.serial_port.as_mut() {
+            if prev_duty != self.duty_cycle {
+                debug!("Actualizando ciclo de trabajo a {}", self.duty_cycle);
+                set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
+                    error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                });
+            }
+
+            if prev_freq != self.frequency {
+                debug!("Actualizando frecuencia a {}", self.frequency);
+                set_frequency(serial_port, self.frequency)
+                    .unwrap_or_else(|e| error!("No se pudo actualizar la frecuencia: {e}"));
+            }
+        }
         //
         // DockArea::new(&mut self.tree)
         //     .style(Style::from_egui(ctx.style().as_ref()))
@@ -159,40 +180,5 @@ impl eframe::App for SepicApp {
         //         ui.add(PWMPreview::new(self.duty_cycle, 4));
         //     });
         // });
-
-        if prev_duty != self.duty_cycle || prev_freq != self.frequency {
-            debug!(
-                "Cambio en los parámetros PWM: ({},{}) -> ({},{})",
-                prev_freq, prev_duty, self.frequency, self.duty_cycle
-            );
-
-            if let Some(port) = &mut self.serial_port {
-                if (prev_duty - self.duty_cycle).abs() >= 5.0 {
-                    ramp_duty(port, prev_duty, self.duty_cycle, 1000).map_or_else(
-                        |e| {
-                            error!("Falló rampa de duty cycle: {e:?}");
-                            None
-                        },
-                        Some,
-                    );
-                } else {
-                    set_duty(port, self.duty_cycle).map_or_else(
-                        |e| {
-                            error!("Falló cambiar el duty cycle: {e:?}");
-                            None
-                        },
-                        Some,
-                    );
-
-                    set_frequency(port, self.frequency).map_or_else(
-                        |e| {
-                            error!("Falló cambiar la frecuencia: {e:?}");
-                            None
-                        },
-                        Some,
-                    );
-                }
-            }
-        }
     }
 }
