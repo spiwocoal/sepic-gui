@@ -1,11 +1,28 @@
-use std::{rc::Rc, str::from_utf8};
+use std::{
+    io::{Read, Write},
+    rc::Rc,
+};
 
 use anyhow::{Result, anyhow};
 use log::debug;
 use serialport::{SerialPort, SerialPortInfo};
 
+const STX: [u8; 1] = [0x02];
+const ETX: [u8; 1] = [0x03];
+const ENQ: [u8; 1] = [0x05];
+
 const ACK: [u8; 1] = [0x06];
 const NACK: [u8; 1] = [0x15];
+
+#[expect(unsafe_code)]
+fn from_utf8_escaped(body: &[u8]) -> String {
+    unsafe {
+        str::from_utf8_unchecked(body)
+            .trim_end_matches('\0')
+            .escape_default()
+            .to_string()
+    }
+}
 
 pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
     serialport::available_ports()
@@ -15,44 +32,47 @@ pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
         .collect()
 }
 
-pub fn attempt_handshake(mut port: Box<dyn SerialPort>) -> Result<Box<dyn SerialPort>> {
-    let mut buf = [0u8; 64];
+pub fn send_command<'a, T: Write + Read + ?Sized>(port: &'a mut Box<T>, cmd: &[u8]) -> Result<()> {
+    let mut input_buf = [0u8; 64];
+    let output_buf: Vec<u8> = vec![&STX, cmd, &ETX].concat();
+    let output_buf = output_buf.as_slice();
 
-    port.write_all(&[0x02, 0x05, 0x03])?;
-    let _ = port.read(&mut buf)?;
-    let buf = buf
+    debug!("Enviando mensaje `{}`", from_utf8_escaped(output_buf));
+
+    port.write_all(output_buf)?;
+    let _ = port.read(&mut input_buf)?;
+
+    debug!("Mensaje recibido `{}`", from_utf8_escaped(&input_buf));
+
+    input_buf
         .get(0..ACK.len())
-        .ok_or(anyhow!("No se pudo seccionar la respuesta del dispositivo"))?;
-    if buf.iter().zip(ACK.iter()).all(|(a, b)| a == b) {
-        return Ok(port);
-    }
-
-    Err(anyhow!(
-        "El dispositivo no responde correctamente, {:x?}",
-        buf
-    ))
+        .ok_or(anyhow!("No se pudo seccionar la respuesta del dispositivo"))?
+        .iter()
+        .zip(ACK.iter())
+        .all(|(a, b)| a == b)
+        .then_some(())
+        .ok_or(anyhow!(
+            "La respuesta del dispositivo es inválida `{}`",
+            from_utf8_escaped(&input_buf)
+        ))
 }
 
-pub fn set_duty(port: &mut Box<dyn SerialPort>, duty_cycle: f32) -> Result<()> {
-    let mut buf = [0u8; 64];
-    let query = format!("\x02DCS {:x}\x03", (duty_cycle * ((1 << 9) as f32)) as u32);
-    debug!("Enviando mensaje {:?}", query);
-
-    port.write_all(query.as_bytes())?;
-
-    let _ = port.read(&mut buf)?;
-    debug!("Mensaje recibido: {:?}", from_utf8(&buf));
-    let buf = buf
-        .get(0..ACK.len())
-        .ok_or(anyhow!("No se pudo seccionar la respuesta del dispositivo"))?;
-    if buf.iter().zip(ACK.iter()).all(|(a, b)| a == b) {
-        return Ok(());
+fn send_command_owned<T: Write + Read + ?Sized>(mut port: Box<T>, cmd: &[u8]) -> Result<Box<T>> {
+    match send_command(&mut port, cmd) {
+        Ok(_) => Ok(port),
+        Err(e) => Err(e),
     }
+}
 
-    Err(anyhow!(
-        "El dispositivo no responde correctamente, {:x?}",
-        buf
-    ))
+pub fn attempt_handshake<T: Write + Read + ?Sized>(port: Box<T>) -> Result<Box<T>> {
+    send_command_owned(port, &ENQ)
+}
+
+pub fn set_duty<T: Write + Read + ?Sized>(port: &mut Box<T>, duty_cycle: f32) -> Result<()> {
+    send_command(
+        port,
+        format!("DCS {:#x}", (duty_cycle * ((1 << 9) as f32)) as u32).as_bytes(),
+    )
 }
 
 pub fn ramp_duty(
@@ -61,50 +81,18 @@ pub fn ramp_duty(
     duty_end: f32,
     tspan: u32,
 ) -> Result<()> {
-    let mut buf = [0u8; 64];
-    let query = format!(
-        "\x02DCR {:#x} {:#x} {:#x}\x03",
-        (duty_start * ((1 << 9) as f32)) as u32,
-        (duty_end * ((1 << 9) as f32)) as u32,
-        tspan
-    );
-    debug!("Enviando mensaje {:?}", query);
-
-    port.write_all(query.as_bytes())?;
-
-    let _ = port.read(&mut buf)?;
-    debug!("Mensaje recibido: {:?}", buf);
-    let buf = buf
-        .get(0..ACK.len())
-        .ok_or(anyhow!("No se pudo seccionar la respuesta del dispositivo"))?;
-    if buf.iter().zip(ACK.iter()).all(|(a, b)| a == b) {
-        return Ok(());
-    }
-
-    Err(anyhow!(
-        "El dispositivo no responde correctamente, {:x?}",
-        buf
-    ))
+    send_command(
+        port,
+        format!(
+            "DCR {:#x} {:#x} {:#x}",
+            (duty_start * ((1 << 9) as f32)) as u32,
+            (duty_end * ((1 << 9) as f32)) as u32,
+            tspan
+        )
+        .as_bytes(),
+    )
 }
 
 pub fn set_frequency(port: &mut Box<dyn SerialPort>, frequency: f32) -> Result<()> {
-    let mut buf = [0u8; 64];
-    let query = format!("\x02FQS {:#x}\x03", (frequency) as u32);
-    debug!("Enviando mensaje {:?}", query);
-
-    port.write_all(query.as_bytes())?;
-
-    let _ = port.read(&mut buf)?;
-    debug!("Mensaje recibido: {:?}", buf);
-    let buf = buf
-        .get(0..ACK.len())
-        .ok_or(anyhow!("No se pudo seccionar la respuesta del dispositivo"))?;
-    if buf.iter().zip(ACK.iter()).all(|(a, b)| a == b) {
-        return Ok(());
-    }
-
-    Err(anyhow!(
-        "El dispositivo no responde correctamente, {:x?}",
-        buf
-    ))
+    send_command(port, format!("FQS {:#x}", frequency as u32).as_bytes())
 }
