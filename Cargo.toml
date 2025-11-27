@@ -26,7 +26,10 @@ log = "0.4.27"
 serde = { version = "1.0.219", features = ["derive"] }
 anyhow = "1.0.100"
 serialport = "4.8.1"
-# egui_dock = "0.18.0"
+egui_dock = "0.18.0"
+egui_plot = "0.34.0"
+egui_logger = "0.9.0"
+multi_log = "0.1.2"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

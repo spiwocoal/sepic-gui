@@ -1,10 +1,12 @@
 use std::{rc::Rc, time::Duration};
 
 use crate::{
-    PWMPreview,
+    MyTabViewer,
     serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
+    tabs::MyTab,
 };
-// use egui_dock::{DockState, NodeIndex, Style};
+use egui::Ui;
+use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
 
@@ -15,15 +17,15 @@ pub struct SepicApp {
     port_info: Option<Rc<SerialPortInfo>>,
     duty_cycle: f32,
     frequency: f32,
-    // tree: DockState<String>,
+    tree: DockState<MyTab>,
 }
 
 impl Default for SepicApp {
     fn default() -> Self {
-        // let mut tree = DockState::new(vec!["PWM".to_owned()]);
-        // let [_, _] =
-        //     tree.main_surface_mut()
-        //         .split_below(NodeIndex::root(), 0.2, vec!["Consola".to_owned()]);
+        let mut tree = DockState::new(vec![MyTab::plot_window()]);
+        let [_, _] =
+            tree.main_surface_mut()
+                .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
 
         Self {
             available_ports: get_serial_ports(),
@@ -32,7 +34,7 @@ impl Default for SepicApp {
             port_info: None,
             duty_cycle: 1.0,
             frequency: 60e3,
-            // tree,
+            tree,
         }
     }
 }
@@ -62,75 +64,15 @@ impl SepicApp {
             });
         });
     }
-}
 
-impl eframe::App for SepicApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let prev_port = self.port_info.clone();
+    fn update_settingsbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let prev_duty = self.duty_cycle;
         let prev_freq = self.frequency;
-
-        Self::update_menubar(ctx, _frame);
 
         egui::SidePanel::left("Ajustes").show(ctx, |ui| {
             ui.heading("SEPIC");
             ui.vertical(|ui| {
-                // TODO: panel escondible para conexión serial
-                ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new("⟲")).clicked() {
-                        self.update_serial_ports();
-                    }
-                    egui::containers::ComboBox::from_label("Puerto serial")
-                        .selected_text(if let Some(port) = &prev_port {
-                            port.port_name.clone()
-                        } else {
-                            "Selecciona...".to_owned()
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.label("Selecciona...");
-                            for port in &self.available_ports {
-                                let port = Rc::clone(port);
-                                ui.selectable_value(
-                                    &mut self.port_info,
-                                    Some(Rc::clone(&port)),
-                                    &port.port_name,
-                                );
-                            }
-                        });
-
-                    egui::containers::ComboBox::from_label("Baudrate")
-                        .selected_text(format!("{}", self.baudrate))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.baudrate, 9600, format!("{}", 9600));
-                            ui.selectable_value(&mut self.baudrate, 38400, format!("{}", 38400));
-                            ui.selectable_value(&mut self.baudrate, 115200, format!("{}", 115200));
-                        });
-                });
-
-                if prev_port != self.port_info
-                    && let Some(port) = &self.port_info
-                {
-                    debug!("Se seleccionó nuevo puerto serial ({})", port.port_name);
-                    self.serial_port = serialport::new(&port.port_name, self.baudrate)
-                        .timeout(Duration::from_millis(500))
-                        .open()
-                        .map_or_else(
-                            |e| {
-                                // TODO: mostrar un popup en GUI si falló la conexión al puerto
-                                error!("No se pudo abrir el puerto {}: {:?}", port.port_name, e);
-                                None
-                            },
-                            |port| {
-                                attempt_handshake(port).map_or_else(
-                                    |e| {
-                                        error!("Falló el handshake con el dispositivo: {e:?}");
-                                        None
-                                    },
-                                    Some,
-                                )
-                            },
-                        );
-                }
+                self.update_serial_settings(ui);
 
                 let mut ui_builder = egui::UiBuilder::new();
                 if self.serial_port.is_none() {
@@ -171,10 +113,89 @@ impl eframe::App for SepicApp {
                     .unwrap_or_else(|e| error!("No se pudo actualizar la frecuencia: {e}"));
             }
         }
-        //
-        // DockArea::new(&mut self.tree)
-        //     .style(Style::from_egui(ctx.style().as_ref()))
-        //     .show(ctx,
+    }
+
+    fn update_serial_settings(&mut self, ui: &mut Ui) {
+        let prev_port = self.port_info.clone();
+
+        ui.collapsing("Conexión serial", |ui| {
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new("⟲")).clicked() {
+                    self.update_serial_ports();
+                    debug!("Puerto seriales disponibles: {:?}", self.available_ports);
+                    debug!("Puerto serial seleccionado: {:?}", self.port_info);
+                    if let Some(port_info) = self.port_info.as_ref()
+                        && !self.available_ports.contains(port_info)
+                    {
+                        self.port_info = None;
+                    }
+                }
+                egui::containers::ComboBox::from_label("Puerto serial")
+                    .selected_text(if let Some(port) = &prev_port {
+                        port.port_name.clone()
+                    } else {
+                        "Selecciona...".to_owned()
+                    })
+                    .show_ui(ui, |ui| {
+                        self.update_serial_ports();
+                        ui.label("Selecciona...");
+                        for port in &self.available_ports {
+                            let port = Rc::clone(port);
+                            ui.selectable_value(
+                                &mut self.port_info,
+                                Some(Rc::clone(&port)),
+                                &port.port_name,
+                            );
+                        }
+                    });
+            });
+
+            egui::containers::ComboBox::from_label("Baudrate")
+                .selected_text(format!("{}", self.baudrate))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.baudrate, 9600, format!("{}", 9600));
+                    ui.selectable_value(&mut self.baudrate, 38400, format!("{}", 38400));
+                    ui.selectable_value(&mut self.baudrate, 115200, format!("{}", 115200));
+                });
+        });
+
+        if prev_port != self.port_info
+            && let Some(port) = &self.port_info
+        {
+            debug!("Se seleccionó nuevo puerto serial `{}`", port.port_name);
+            self.serial_port = serialport::new(&port.port_name, self.baudrate)
+                .timeout(Duration::from_millis(500))
+                .open()
+                .map_or_else(
+                    |e| {
+                        // TODO: mostrar un popup en GUI si falló la conexión al puerto
+                        error!("No se pudo abrir el puerto `{}`: `{:?}`", port.port_name, e);
+                        None
+                    },
+                    |port| {
+                        attempt_handshake(port).map_or_else(
+                            |e| {
+                                error!("Falló el handshake con el dispositivo: {e:?}");
+                                None
+                            },
+                            Some,
+                        )
+                    },
+                );
+        }
+    }
+}
+
+impl eframe::App for SepicApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        Self::update_menubar(ctx, _frame);
+        self.update_settingsbar(ctx, _frame);
+
+        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 3);
+
+        DockArea::new(&mut self.tree)
+            .style(Style::from_egui(ctx.style().as_ref()))
+            .show(ctx, &mut viewer);
         // egui::CentralPanel::default().show(ctx, |ui| {
         //     ui.horizontal(|ui| {
         //         ui.add(PWMPreview::new(self.duty_cycle, 4));
