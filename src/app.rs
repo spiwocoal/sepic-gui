@@ -32,7 +32,7 @@ impl Default for SepicApp {
             serial_port: None,
             baudrate: 9600,
             port_info: None,
-            duty_cycle: 1.0,
+            duty_cycle: 0.0,
             frequency: 60e3,
             tree,
         }
@@ -87,7 +87,7 @@ impl SepicApp {
                             .custom_formatter(|n, _| format!("{n:02.1}")),
                     );
                     ui.add(
-                        egui::Slider::new(&mut self.frequency, 50e3..=100e3)
+                        egui::Slider::new(&mut self.frequency, 60e3..=120e3)
                             .text("(kHz) Frecuencia")
                             .custom_formatter(|n, _| {
                                 let n = n / 1e3;
@@ -172,14 +172,12 @@ impl SepicApp {
                         error!("No se pudo abrir el puerto `{}`: `{:?}`", port.port_name, e);
                         None
                     },
-                    |port| {
-                        attempt_handshake(port).map_or_else(
-                            |e| {
-                                error!("Falló el handshake con el dispositivo: {e:?}");
-                                None
-                            },
-                            Some,
-                        )
+                    |mut port| match attempt_handshake(&mut port) {
+                        Ok(_) => Some(port),
+                        Err(e) => {
+                            error!("Falló el handshake con el dispositivo: {e:?}");
+                            None
+                        }
                     },
                 );
         }
@@ -191,15 +189,10 @@ impl eframe::App for SepicApp {
         Self::update_menubar(ctx, _frame);
         self.update_settingsbar(ctx, _frame);
 
-        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 3);
+        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 4);
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
             .show(ctx, &mut viewer);
-        // egui::CentralPanel::default().show(ctx, |ui| {
-        //     ui.horizontal(|ui| {
-        //         ui.add(PWMPreview::new(self.duty_cycle, 4));
-        //     });
-        // });
     }
 }

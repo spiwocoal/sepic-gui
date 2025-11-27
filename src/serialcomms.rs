@@ -32,6 +32,7 @@ pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
         .collect()
 }
 
+// TODO: Result<String> o Result<Vec<u8>>
 pub fn send_command<'a, T: Write + Read + ?Sized>(port: &'a mut Box<T>, cmd: &[u8]) -> Result<()> {
     let mut input_buf = [0u8; 64];
     let output_buf: Vec<u8> = vec![&STX, cmd, &ETX].concat();
@@ -57,15 +58,8 @@ pub fn send_command<'a, T: Write + Read + ?Sized>(port: &'a mut Box<T>, cmd: &[u
         ))
 }
 
-fn send_command_owned<T: Write + Read + ?Sized>(mut port: Box<T>, cmd: &[u8]) -> Result<Box<T>> {
-    match send_command(&mut port, cmd) {
-        Ok(_) => Ok(port),
-        Err(e) => Err(e),
-    }
-}
-
-pub fn attempt_handshake<T: Write + Read + ?Sized>(port: Box<T>) -> Result<Box<T>> {
-    send_command_owned(port, &ENQ)
+pub fn attempt_handshake<T: Write + Read + ?Sized>(port: &mut Box<T>) -> Result<()> {
+    send_command(port, &ENQ)
 }
 
 pub fn set_duty<T: Write + Read + ?Sized>(port: &mut Box<T>, duty_cycle: f32) -> Result<()> {

@@ -88,7 +88,16 @@ impl PlotWindow {
             .collect();
 
         let line = Line::new("pwm", points);
-        Plot::new("pwm_plot").show(ui, |plot_ui| plot_ui.line(line));
+        Plot::new("pwm_plot")
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_boxed_zoom(false)
+            .allow_drag(false)
+            .include_y(5.0)
+            .include_y(0.0)
+            .x_axis_label("Tiempo / μs")
+            .y_axis_label("Voltaje / V")
+            .show(ui, |plot_ui| plot_ui.line(line));
     }
 }
 
