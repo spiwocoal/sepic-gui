@@ -2,7 +2,7 @@ use std::{rc::Rc, time::Duration};
 
 use crate::{
     MyTabViewer,
-    serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
+    serialcomms::{attempt_handshake, get_serial_ports, set_duty, set_frequency},
     tabs::MyTab,
 };
 use egui::Ui;

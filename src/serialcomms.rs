@@ -12,10 +12,15 @@ const ETX: [u8; 1] = [0x03];
 const ENQ: [u8; 1] = [0x05];
 
 const ACK: [u8; 1] = [0x06];
+#[expect(dead_code)]
 const NACK: [u8; 1] = [0x15];
 
 #[expect(unsafe_code)]
 fn from_utf8_escaped(body: &[u8]) -> String {
+    // SAFETY:
+    // La respuesta del dispositivo contiene únicamente
+    // caracteres ASCII, por lo que es seguro realizar
+    // esta conversión.
     unsafe {
         str::from_utf8_unchecked(body)
             .trim_end_matches('\0')
@@ -33,15 +38,15 @@ pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
 }
 
 // TODO: Result<String> o Result<Vec<u8>>
-pub fn send_command<'a, T: Write + Read + ?Sized>(port: &'a mut Box<T>, cmd: &[u8]) -> Result<()> {
+pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> Result<()> {
     let mut input_buf = [0u8; 64];
-    let output_buf: Vec<u8> = vec![&STX, cmd, &ETX].concat();
+    let output_buf: Vec<u8> = [&STX, cmd, &ETX].concat();
     let output_buf = output_buf.as_slice();
 
     debug!("Enviando mensaje `{}`", from_utf8_escaped(output_buf));
 
     port.write_all(output_buf)?;
-    let _ = port.read(&mut input_buf)?;
+    port.read_exact(&mut input_buf)?;
 
     debug!("Mensaje recibido `{}`", from_utf8_escaped(&input_buf));
 
@@ -69,6 +74,7 @@ pub fn set_duty<T: Write + Read + ?Sized>(port: &mut Box<T>, duty_cycle: f32) ->
     )
 }
 
+#[expect(dead_code)]
 pub fn ramp_duty(
     port: &mut Box<dyn SerialPort>,
     duty_start: f32,
