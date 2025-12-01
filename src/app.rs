@@ -1,11 +1,12 @@
-use std::{rc::Rc, time::Duration};
+use std::{fmt, rc::Rc, time::Duration};
 
 use crate::{
     MyTabViewer,
     serialcomms::{attempt_handshake, get_serial_ports, set_duty, set_frequency},
     tabs::MyTab,
 };
-use egui::Ui;
+use anyhow::Error;
+use egui::{Color32, Id, Modal, RichText, Ui};
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
@@ -17,6 +18,7 @@ pub struct SepicApp {
     port_info: Option<Rc<SerialPortInfo>>,
     duty_cycle: f32,
     frequency: f32,
+    error_modal: Option<AppError>,
     tree: DockState<MyTab>,
 }
 
@@ -35,6 +37,7 @@ impl Default for SepicApp {
             duty_cycle: 0.0,
             frequency: 60e3,
             tree,
+            error_modal: None,
         }
     }
 }
@@ -104,13 +107,16 @@ impl SepicApp {
                 debug!("Actualizando ciclo de trabajo a {}", self.duty_cycle);
                 set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
                     error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                    self.error_modal = Some(AppError::setting("duty cycle", &e));
                 });
             }
 
             if prev_freq != self.frequency {
                 debug!("Actualizando frecuencia a {}", self.frequency);
-                set_frequency(serial_port, self.frequency)
-                    .unwrap_or_else(|e| error!("No se pudo actualizar la frecuencia: {e}"));
+                set_frequency(serial_port, self.frequency).unwrap_or_else(|e| {
+                    error!("No se pudo actualizar la frecuencia: {e}");
+                    self.error_modal = Some(AppError::setting("frecuencia", &e));
+                });
             }
         }
     }
@@ -168,24 +174,38 @@ impl SepicApp {
                 .open()
                 .map_or_else(
                     |e| {
-                        // TODO: mostrar un popup en GUI si falló la conexión al puerto
                         error!("No se pudo abrir el puerto `{}`: `{:?}`", port.port_name, e);
+                        self.error_modal = Some(AppError::connection(
+                            port.port_name.as_str(),
+                            &Error::new(e),
+                        ));
                         None
                     },
-                    |mut port| match attempt_handshake(&mut port) {
-                        Ok(_) => Some(port),
-                        Err(e) => {
-                            error!("Falló el handshake con el dispositivo: {e:?}");
-                            None
-                        }
-                    },
+                    Some,
                 );
+
+            if let Some(port) = self.serial_port.as_mut()
+                && let Err(e) = attempt_handshake(port)
+            {
+                error!("Falló el handshake con el dispositivo: {e:?}");
+                self.error_modal = Some(AppError::handshake(
+                    port.name()
+                        .unwrap_or("puerto desconocido".to_owned())
+                        .as_str(),
+                    &e,
+                ));
+                self.serial_port = None;
+            }
         }
     }
 }
 
 impl eframe::App for SepicApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.serial_port.is_none() {
+            self.port_info = None;
+        }
+
         Self::update_menubar(ctx, _frame);
         self.update_settingsbar(ctx, _frame);
 
@@ -194,5 +214,57 @@ impl eframe::App for SepicApp {
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
             .show(ctx, &mut viewer);
+
+        if let Some(error) = self.error_modal.clone() {
+            let modal = Modal::new(Id::new("Error modal"))
+                .backdrop_color(Color32::RED.gamma_multiply(0.3))
+                .show(ctx, |ui| {
+                    ui.set_width(250.0);
+
+                    ui.heading(RichText::new("Error"));
+
+                    ui.label(format!("{error}"));
+                    ui.monospace(format!("{:?}", error.source_description));
+                });
+
+            if modal.should_close() {
+                self.error_modal = None;
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AppError {
+    pub description: String,
+    pub source_description: String,
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.description)
+    }
+}
+
+impl AppError {
+    pub fn connection(port: &str, error: &Error) -> Self {
+        Self {
+            description: format!("No se pudo abrir el puerto `{port}`"),
+            source_description: error.to_string(),
+        }
+    }
+
+    pub fn handshake(port: &str, error: &Error) -> Self {
+        Self {
+            description: format!("No se reconoce el dispositivo `{port}`"),
+            source_description: error.to_string(),
+        }
+    }
+
+    pub fn setting(var: &str, error: &Error) -> Self {
+        Self {
+            description: format!("Ocurrió un problema al ajustar {var}"),
+            source_description: error.to_string(),
+        }
     }
 }

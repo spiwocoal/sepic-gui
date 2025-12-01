@@ -44,6 +44,9 @@
             xorg.libX11
 
             systemdLibs
+
+            act
+            gdb
           ];
 
           LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";

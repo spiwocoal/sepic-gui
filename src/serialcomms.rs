@@ -46,9 +46,17 @@ pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> 
     debug!("Enviando mensaje `{}`", from_utf8_escaped(output_buf));
 
     port.write_all(output_buf)?;
-    port.read_exact(&mut input_buf)?;
+    let bytes_read = port.read(&mut input_buf)?;
 
-    debug!("Mensaje recibido `{}`", from_utf8_escaped(&input_buf));
+    debug!(
+        "Mensaje recibido de largo {} `{}`",
+        bytes_read,
+        from_utf8_escaped(&input_buf)
+    );
+
+    if bytes_read < ACK.len() {
+        return Err(anyhow!("La respuesta no tiene el largo esperado"));
+    }
 
     input_buf
         .get(0..ACK.len())
@@ -57,10 +65,7 @@ pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> 
         .zip(ACK.iter())
         .all(|(a, b)| a == b)
         .then_some(())
-        .ok_or(anyhow!(
-            "La respuesta del dispositivo es inválida `{}`",
-            from_utf8_escaped(&input_buf)
-        ))
+        .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))
 }
 
 pub fn attempt_handshake<T: Write + Read + ?Sized>(port: &mut Box<T>) -> Result<()> {

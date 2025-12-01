@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 fn main() -> eframe::Result {
-    let egui_logger = Box::new(egui_logger::builder().build());
+    let egui_logger = Box::new(egui_logger::builder().show_all_categories(false).build());
     let env_logger = Box::new(env_logger::builder().default_format().build());
 
     multi_log::MultiLogger::init(vec![egui_logger, env_logger], log::Level::Debug)
@@ -10,8 +10,8 @@ fn main() -> eframe::Result {
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0]), /*.with_icon(
+            .with_inner_size([1000.0, 600.0])
+            .with_min_inner_size([700.0, 400.0]), /*.with_icon(
                                                       eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon-256.png")[..])
                                                           .expect("Failed to load icon"),
                                                   )*/

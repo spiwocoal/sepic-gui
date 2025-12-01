@@ -10,3 +10,6 @@ pub use pwm::PWMPreview;
 
 mod tabs;
 pub use tabs::MyTabViewer;
+//
+// mod logger;
+// pub use logger::EguiLogger;
