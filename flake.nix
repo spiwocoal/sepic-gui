@@ -22,8 +22,11 @@
         devShells.default = mkShell rec {
           buildInputs = [
             # Rust
-            rust-bin.stable.latest.default
+            (rust-bin.stable.latest.default.override {
+              targets = ["x86_64-pc-windows-msvc" "aarch64-apple-darwin"];
+            })
             rust-analyzer
+            cargo-xwin
 
             # misc. libraries
             openssl

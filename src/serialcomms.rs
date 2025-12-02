@@ -37,8 +37,7 @@ pub fn get_serial_ports() -> Vec<Rc<SerialPortInfo>> {
         .collect()
 }
 
-// TODO: Result<String> o Result<Vec<u8>>
-pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> Result<()> {
+pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> Result<Vec<u8>> {
     let mut input_buf = [0u8; 64];
     let output_buf: Vec<u8> = [&STX, cmd, &ETX].concat();
     let output_buf = output_buf.as_slice();
@@ -64,22 +63,49 @@ pub fn send_command<T: Write + Read + ?Sized>(port: &mut Box<T>, cmd: &[u8]) -> 
         .iter()
         .zip(ACK.iter())
         .all(|(a, b)| a == b)
-        .then_some(())
+        .then_some(input_buf.to_vec())
         .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))
 }
 
-pub fn attempt_handshake<T: Write + Read + ?Sized>(port: &mut Box<T>) -> Result<()> {
-    send_command(port, &ENQ)
+pub fn attempt_handshake<T: Write + Read + ?Sized>(port: &mut Box<T>) -> Result<(f32, f32)> {
+    let response = send_command(port, &ENQ)?;
+
+    let mut freq = 0.0;
+    let mut duty = 0.0;
+
+    let commands: Vec<String> = response
+        .split(|&c| c == STX[0] || c == ETX[0])
+        .skip(1)
+        .filter(|s| !s.is_empty())
+        .map(|s| from_utf8_escaped(s))
+        .collect();
+
+    for cmd in commands.iter() {
+        let chunks: Vec<_> = cmd.split(" ").collect();
+        if chunks[0].starts_with("FRQ") {
+            let freq_int: u32 = u32::from_str_radix(chunks[1], 16)?;
+            freq = freq_int as f32;
+        } else if chunks[0].starts_with("DTY") {
+            let duty_int: u32 = u32::from_str_radix(chunks[1], 16)?;
+            duty = (duty_int as f32) * 2.0_f32.powi(-9);
+        }
+    }
+
+    debug!("Dispositivo conectado con frecuencia {freq} Hz y duty {duty}%");
+
+    Ok((freq, duty))
 }
 
 pub fn set_duty<T: Write + Read + ?Sized>(port: &mut Box<T>, duty_cycle: f32) -> Result<()> {
     send_command(
         port,
         format!("DCS {:#x}", (duty_cycle * ((1 << 9) as f32)) as u32).as_bytes(),
-    )
+    )?;
+
+    Ok(())
 }
 
-#[expect(dead_code)]
+// #[expect(dead_code)]
 pub fn ramp_duty(
     port: &mut Box<dyn SerialPort>,
     duty_start: f32,
@@ -95,9 +121,12 @@ pub fn ramp_duty(
             tspan
         )
         .as_bytes(),
-    )
+    )?;
+
+    Ok(())
 }
 
 pub fn set_frequency(port: &mut Box<dyn SerialPort>, frequency: f32) -> Result<()> {
-    send_command(port, format!("FQS {:#x}", frequency as u32).as_bytes())
+    send_command(port, format!("FQS {:#x}", frequency as u32).as_bytes())?;
+    Ok(())
 }

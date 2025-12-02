@@ -2,7 +2,7 @@ use std::{fmt, rc::Rc, time::Duration};
 
 use crate::{
     MyTabViewer,
-    serialcomms::{attempt_handshake, get_serial_ports, set_duty, set_frequency},
+    serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
     tabs::MyTab,
 };
 use anyhow::Error;
@@ -69,13 +69,15 @@ impl SepicApp {
     }
 
     fn update_settingsbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let prev_duty = self.duty_cycle;
-        let prev_freq = self.frequency;
+        let mut prev_duty = self.duty_cycle;
+        let mut prev_freq = self.frequency;
 
         egui::SidePanel::left("Ajustes").show(ctx, |ui| {
             ui.heading("SEPIC");
             ui.vertical(|ui| {
                 self.update_serial_settings(ui);
+                prev_duty = self.duty_cycle;
+                prev_freq = self.frequency;
 
                 let mut ui_builder = egui::UiBuilder::new();
                 if self.serial_port.is_none() {
@@ -86,12 +88,13 @@ impl SepicApp {
                     ui.add(
                         egui::Slider::new(&mut self.duty_cycle, 0.0..=75.0)
                             .text("(%) Duty cycle")
-                            .step_by(0.1)
+                            .update_while_editing(false)
                             .custom_formatter(|n, _| format!("{n:02.1}")),
                     );
                     ui.add(
                         egui::Slider::new(&mut self.frequency, 60e3..=120e3)
                             .text("(kHz) Frecuencia")
+                            .update_while_editing(false)
                             .custom_formatter(|n, _| {
                                 let n = n / 1e3;
                                 format!("{n:02.1}")
@@ -105,10 +108,17 @@ impl SepicApp {
         if let Some(serial_port) = self.serial_port.as_mut() {
             if prev_duty != self.duty_cycle {
                 debug!("Actualizando ciclo de trabajo a {}", self.duty_cycle);
-                set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
-                    error!("No se pudo actualizar el ciclo de trabajo: {e}");
-                    self.error_modal = Some(AppError::setting("duty cycle", &e));
-                });
+                if (prev_duty - self.duty_cycle).abs() > 15.0 {
+                    ramp_duty(serial_port, prev_duty, self.duty_cycle, 1000).unwrap_or_else(|e| {
+                        error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                        self.error_modal = Some(AppError::setting("duty cycle", &e));
+                    });
+                } else {
+                    set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
+                        error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                        self.error_modal = Some(AppError::setting("duty cycle", &e));
+                    });
+                }
             }
 
             if prev_freq != self.frequency {
@@ -184,17 +194,23 @@ impl SepicApp {
                     Some,
                 );
 
-            if let Some(port) = self.serial_port.as_mut()
-                && let Err(e) = attempt_handshake(port)
-            {
-                error!("Falló el handshake con el dispositivo: {e:?}");
-                self.error_modal = Some(AppError::handshake(
-                    port.name()
-                        .unwrap_or("puerto desconocido".to_owned())
-                        .as_str(),
-                    &e,
-                ));
-                self.serial_port = None;
+            if let Some(port) = self.serial_port.as_mut() {
+                match attempt_handshake(port) {
+                    Ok((freq, duty)) => {
+                        self.frequency = freq;
+                        self.duty_cycle = duty;
+                    }
+                    Err(e) => {
+                        error!("Falló el handshake con el dispositivo: {e:?}");
+                        self.error_modal = Some(AppError::handshake(
+                            port.name()
+                                .unwrap_or("puerto desconocido".to_owned())
+                                .as_str(),
+                            &e,
+                        ));
+                        self.serial_port = None;
+                    }
+                }
             }
         }
     }
