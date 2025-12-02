@@ -77,16 +77,34 @@ pub fn attempt_handshake<T: Write + Read + ?Sized>(port: &mut Box<T>) -> Result<
         .split(|&c| c == STX[0] || c == ETX[0])
         .skip(1)
         .filter(|s| !s.is_empty())
-        .map(|s| from_utf8_escaped(s))
+        .map(from_utf8_escaped)
         .collect();
 
-    for cmd in commands.iter() {
-        let chunks: Vec<_> = cmd.split(" ").collect();
-        if chunks[0].starts_with("FRQ") {
-            let freq_int: u32 = u32::from_str_radix(chunks[1], 16)?;
+    for cmd in &commands {
+        let chunks: Vec<_> = cmd.split(' ').collect();
+        if chunks
+            .first()
+            .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))?
+            .starts_with("FRQ")
+        {
+            let freq_int: u32 = u32::from_str_radix(
+                chunks
+                    .get(1)
+                    .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))?,
+                16,
+            )?;
             freq = freq_int as f32;
-        } else if chunks[0].starts_with("DTY") {
-            let duty_int: u32 = u32::from_str_radix(chunks[1], 16)?;
+        } else if chunks
+            .first()
+            .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))?
+            .starts_with("DTY")
+        {
+            let duty_int: u32 = u32::from_str_radix(
+                chunks
+                    .get(1)
+                    .ok_or(anyhow!("La respuesta del dispositivo no es la esperada"))?,
+                16,
+            )?;
             duty = (duty_int as f32) * 2.0_f32.powi(-9);
         }
     }

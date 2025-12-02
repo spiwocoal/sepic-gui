@@ -43,7 +43,28 @@ jobs:
           components: clippy
       - run: cargo clippy -- -D warnings
 
-  build:
+  build-linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-latest
+          TARGET: x86_64-unknown-linux-gnu
+
+        - os: ubuntu-latest
+          TARGET: aarch64-unknown-linux-gnu
+    steps:
+    - name: Building ${{ matrix.TARGET }}
+      run: echo "${{ matrix.TARGET }}"
+
+    - uses: actions/checkout@master
+    - name: Install dependencies
+      run: sudo apt-get install libudev-dev
+    - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
+    - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
+
+  build-macos:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -52,15 +73,22 @@ jobs:
         - os: macos-latest
           TARGET: aarch64-apple-darwin
 
-        - os: macos-latest
+        - os: macos-latest-large
           TARGET: x86_64-apple-darwin
+    steps:
+    - name: Building ${{ matrix.TARGET }}
+      run: echo "${{ matrix.TARGET }}"
 
-        - os: ubuntu-latest
-          TARGET: x86_64-unknown-linux-gnu
+    - uses: actions/checkout@master
+    - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
+    - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
 
-        - os: ubuntu-latest
-          TARGET: aarch64-unknown-linux-gnu
-
+  build-windows:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
         - os: windows-latest
           TARGET: x86_64-pc-windows-msvc
           EXTENSION: .exe
@@ -68,7 +96,6 @@ jobs:
         - os: windows-latest
           TARGET: x86_64-pc-windows-gnu
           EXTENSION: .exe
-
     steps:
     - name: Building ${{ matrix.TARGET }}
       run: echo "${{ matrix.TARGET }}"

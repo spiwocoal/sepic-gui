@@ -11,10 +11,11 @@ fn main() -> eframe::Result {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 600.0])
-            .with_min_inner_size([700.0, 400.0]), /*.with_icon(
-                                                      eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon-256.png")[..])
-                                                          .expect("Failed to load icon"),
-                                                  )*/
+            .with_min_inner_size([700.0, 400.0])
+            .with_icon(
+                eframe::icon_data::from_png_bytes(&include_bytes!("../assets/ferris.png")[..])
+                    .expect("Failed to load icon"),
+            ),
         ..Default::default()
     };
     eframe::run_native(

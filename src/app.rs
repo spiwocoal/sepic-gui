@@ -1,4 +1,4 @@
-use std::{fmt, rc::Rc, time::Duration};
+use std::{collections::BTreeMap, fmt, rc::Rc, time::Duration};
 
 use crate::{
     MyTabViewer,
@@ -6,7 +6,7 @@ use crate::{
     tabs::MyTab,
 };
 use anyhow::Error;
-use egui::{Color32, Id, Modal, RichText, Ui};
+use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, RichText, Ui};
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
@@ -43,7 +43,31 @@ impl Default for SepicApp {
 }
 
 impl SepicApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = FontDefinitions::default();
+        fonts.font_data.insert(
+            "7-segment".to_owned(),
+            std::sync::Arc::new(FontData::from_static(include_bytes!(
+                "../assets/fonts/seven-segment.ttf"
+            ))),
+        );
+
+        let mut newfam = BTreeMap::new();
+        newfam.insert(
+            FontFamily::Name("7-segment".into()),
+            vec!["7-segment".to_owned()],
+        );
+        fonts.families.append(&mut newfam);
+
+        fonts
+            .families
+            .get_mut(&FontFamily::Monospace)
+            .expect("Ocurrió un problema al registrar las fuentes")
+            .push("7-segment".to_owned());
+
+        cc.egui_ctx.set_fonts(fonts);
+        cc.egui_ctx.set_zoom_factor(1.5);
+
         Default::default()
     }
 
@@ -101,6 +125,21 @@ impl SepicApp {
                             })
                             .custom_parser(|s| s.parse::<f64>().map(|n| n * 1000.0).ok()),
                     );
+                });
+
+                ui.separator();
+                ui.add_space(ui.available_height() - 60.0);
+
+                ui.label(egui::RichText::new("Voltaje de salida esperado").heading());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{:.2}",
+                            (24.0 * self.duty_cycle / 100.0) / (1.0 - (self.duty_cycle / 100.0))
+                        ))
+                        .font(FontId::new(40.0, FontFamily::Name("7-segment".into()))),
+                    );
+                    ui.label(egui::RichText::new("V").size(35.0).monospace());
                 });
             });
         });
