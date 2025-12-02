@@ -63,6 +63,31 @@ jobs:
       run: sudo apt-get install libudev-dev
     - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
     - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
+    - name: Build archive
+      shell: bash
+      run: |
+        # Replace with the name of your binary
+        binary_name="sepic-gui"
+
+        dirname="$binary_name-${{ matrix.TARGET }}"
+        mkdir "$dirname"
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+        else
+          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+        fi
+
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          7z a "$dirname.zip" "$dirname"
+          echo "ASSET=$dirname.zip" >> $GITHUB_ENV
+        else
+          tar -czf "$dirname.tar.gz" "$dirname"
+          echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+        fi
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sepic-gui-${{ matrix.TARGET}}
+        path: ${{ env.ASSET }}
 
   build-macos:
     runs-on: ${{ matrix.os }}
@@ -82,6 +107,31 @@ jobs:
     - uses: actions/checkout@master
     - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
     - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
+    - name: Build archive
+      shell: bash
+      run: |
+        # Replace with the name of your binary
+        binary_name="sepic-gui"
+
+        dirname="$binary_name-${{ matrix.TARGET }}"
+        mkdir "$dirname"
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+        else
+          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+        fi
+
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          7z a "$dirname.zip" "$dirname"
+          echo "ASSET=$dirname.zip" >> $GITHUB_ENV
+        else
+          tar -czf "$dirname.tar.gz" "$dirname"
+          echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+        fi
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sepic-gui-${{ matrix.TARGET}}
+        path: ${{ env.ASSET }}
 
   build-windows:
     runs-on: ${{ matrix.os }}
@@ -103,3 +153,28 @@ jobs:
     - uses: actions/checkout@master
     - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
     - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
+    - name: Build archive
+      shell: bash
+      run: |
+        # Replace with the name of your binary
+        binary_name="sepic-gui"
+
+        dirname="$binary_name-${{ matrix.TARGET }}"
+        mkdir "$dirname"
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+        else
+          mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+        fi
+
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          7z a "$dirname.zip" "$dirname"
+          echo "ASSET=$dirname.zip" >> $GITHUB_ENV
+        else
+          tar -czf "$dirname.tar.gz" "$dirname"
+          echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+        fi
+    - uses: actions/upload-artifact@v4
+      with:
+        name: sepic-gui-${{ matrix.TARGET}}
+        path: ${{ env.ASSET }}
