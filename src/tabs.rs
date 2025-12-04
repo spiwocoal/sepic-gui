@@ -3,15 +3,15 @@ use egui_plot::{Line, Plot, PlotPoints};
 pub struct MyTabViewer {
     frequency: f32,
     duty_cycle: f32,
-    n_periods: u8,
+    tspan: f64,
 }
 
 impl MyTabViewer {
-    pub fn new(frequency: f32, duty_cycle: f32, n_periods: u8) -> Self {
+    pub fn new(frequency: f32, duty_cycle: f32, tspan: f64) -> Self {
         Self {
             frequency,
             duty_cycle,
-            n_periods,
+            tspan,
         }
     }
 }
@@ -67,14 +67,14 @@ impl PlotWindow {
     }
 
     pub fn ui(ui: &mut egui::Ui, viewer: &MyTabViewer) {
-        let n_periods = viewer.n_periods;
+        let tspan = viewer.tspan;
         let duty_cycle = viewer.duty_cycle;
         let frequency = viewer.frequency;
         let period = (1.0 / frequency as f64) * 1e6;
 
-        let points: PlotPoints<'_> = (0..(100 * n_periods as u32 * period as u32))
+        let points: PlotPoints<'_> = (0..10 * tspan as u32)
             .map(|i| {
-                let t = (i as f64) / 100.0;
+                let t = (i as f64) / 10.0;
                 let duty = duty_cycle as f64 / 100.0;
                 [
                     t,
@@ -89,6 +89,17 @@ impl PlotWindow {
 
         let line = Line::new("pwm", points);
         Plot::new("pwm_plot")
+            .x_grid_spacer(|_| {
+                (0..(4.0 * tspan / period) as u32)
+                    .map(|i| {
+                        let step = if i % 4 == 0 { 100.0 } else { 75.0 };
+                        egui_plot::GridMark {
+                            value: (i as f64) * period,
+                            step_size: step,
+                        }
+                    })
+                    .collect()
+            })
             .allow_scroll(false)
             .allow_zoom(false)
             .allow_boxed_zoom(false)

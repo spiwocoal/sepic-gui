@@ -212,6 +212,18 @@ impl SepicApp {
                     ui.selectable_value(&mut self.baudrate, 38400, format!("{}", 38400));
                     ui.selectable_value(&mut self.baudrate, 115200, format!("{}", 115200));
                 });
+
+            let mut ui_builder = egui::UiBuilder::new();
+            if self.serial_port.is_none() {
+                ui_builder = ui_builder.disabled();
+            }
+
+            ui.scope_builder(ui_builder, |ui| {
+                if ui.button("Desconectar").clicked() {
+                    self.serial_port = None;
+                    self.port_info = None;
+                }
+            });
         });
 
         if prev_port != self.port_info
@@ -264,7 +276,7 @@ impl eframe::App for SepicApp {
         Self::update_menubar(ctx, _frame);
         self.update_settingsbar(ctx, _frame);
 
-        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 4);
+        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 100.0);
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
