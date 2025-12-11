@@ -1,7 +1,12 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use tokio::runtime::Runtime;
+
 fn main() -> eframe::Result {
+    let rt = Runtime::new().expect("No se pudo crear el Runtime para Tokio");
+    let _enter = rt.enter();
+
     let egui_logger = Box::new(egui_logger::builder().show_all_categories(false).build());
     let env_logger = Box::new(env_logger::builder().default_format().build());
 

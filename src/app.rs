@@ -10,32 +10,59 @@ use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, Ri
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
+use tokio::runtime::Runtime;
 
 pub struct SepicApp {
+    rt: Runtime,
+
     available_ports: Vec<Rc<SerialPortInfo>>,
+    port_info: Option<Rc<SerialPortInfo>>,
     serial_port: Option<Box<dyn SerialPort>>,
     baudrate: u32,
-    port_info: Option<Rc<SerialPortInfo>>,
+
     duty_cycle: f32,
     frequency: f32,
+
+    monitor_address: String,
+    monitor_port: u32,
+    monitor_connected: bool,
+
     error_modal: Option<AppError>,
     tree: DockState<MyTab>,
 }
 
 impl Default for SepicApp {
     fn default() -> Self {
-        let mut tree = DockState::new(vec![MyTab::plot_window()]);
+        let rt = Runtime::new().expect("No se pudo crear el Runtime de tokio");
+        // let _enter = rt.enter();
+        //
+        // std::thread::spawn(move || {
+        //     rt.block_on(async {
+        //         loop {
+        //             std::thread::sleep(Duration::from_secs(3600));
+        //         }
+        //     })
+        // });
+        let mut tree = DockState::new(vec![MyTab::pwm_window(), MyTab::meas_window()]);
         let [_, _] =
             tree.main_surface_mut()
                 .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
 
         Self {
+            rt,
+
             available_ports: get_serial_ports(),
+            port_info: None,
             serial_port: None,
             baudrate: 9600,
-            port_info: None,
+
             duty_cycle: 0.0,
             frequency: 60e3,
+
+            monitor_address: "esp32-pelele.local".to_owned(),
+            monitor_port: 4444,
+            monitor_connected: false,
+
             tree,
             error_modal: None,
         }
@@ -100,6 +127,13 @@ impl SepicApp {
             ui.heading("SEPIC");
             ui.vertical(|ui| {
                 self.update_serial_settings(ui);
+
+                ui.separator();
+
+                self.update_monitor_settings(ui);
+
+                ui.separator();
+
                 prev_duty = self.duty_cycle;
                 prev_freq = self.frequency;
 
@@ -264,6 +298,34 @@ impl SepicApp {
                 }
             }
         }
+    }
+
+    fn update_monitor_settings(&mut self, ui: &mut Ui) {
+        ui.collapsing("Conexión a monitor", |ui| {
+            let mut enter_pressed = false;
+
+            ui.horizontal(|ui| {
+                ui.label("Dirección");
+                let addr_box = ui.text_edit_singleline(&mut self.monitor_address);
+                enter_pressed =
+                    addr_box.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Puerto");
+                ui.add(egui::DragValue::new(&mut self.monitor_port).speed(1));
+            });
+
+            if !self.monitor_connected && (enter_pressed || ui.button("Conectar").clicked()) {
+                self.monitor_connected = true;
+                // TODO: realizar conexión a monitor mediante
+                // un nuevo hilo
+            } else if self.monitor_connected && ui.button("Desconectar").clicked() {
+                self.monitor_connected = false;
+                // TODO: realizar desconexión mediante comunicación
+                // con hilo de comunicación con monitor
+            }
+        });
     }
 }
 
