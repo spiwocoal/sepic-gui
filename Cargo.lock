@@ -2675,6 +2675,7 @@ name = "sepic-gui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "eframe",
  "egui",
  "egui_dock",

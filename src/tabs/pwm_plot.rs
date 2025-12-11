@@ -1,20 +1,13 @@
-use crate::MyTabViewer;
 use egui_plot::{Line, Plot, PlotPoints};
 
 pub struct PWMPlot;
 
 impl PWMPlot {
-    pub fn id() -> &'static str {
-        "pwm_plot_window"
-    }
     pub fn title() -> egui::WidgetText {
         "Señal PWM".into()
     }
 
-    pub fn ui(ui: &mut egui::Ui, viewer: &MyTabViewer) {
-        let tspan = viewer.tspan;
-        let duty_cycle = viewer.duty_cycle;
-        let frequency = viewer.frequency;
+    pub fn ui(ui: &mut egui::Ui, frequency: f32, duty_cycle: f32, tspan: f64) {
         let period = (1.0 / frequency as f64) * 1e6;
 
         let points: PlotPoints<'_> = (0..10 * tspan as u32)

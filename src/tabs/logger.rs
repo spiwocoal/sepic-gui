@@ -1,9 +1,6 @@
 pub struct LogConsole;
 
 impl LogConsole {
-    pub fn id() -> &'static str {
-        "log_console"
-    }
     pub fn title() -> egui::WidgetText {
         "Registros".into()
     }

@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, fmt, rc::Rc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    rc::Rc,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use crate::{
     MyTabViewer,
@@ -6,6 +12,7 @@ use crate::{
     tabs::MyTab,
 };
 use anyhow::Error;
+use chrono::{DateTime, Local, TimeDelta};
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, RichText, Ui};
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
@@ -13,6 +20,8 @@ use serialport::{SerialPort, SerialPortInfo};
 use tokio::runtime::Runtime;
 
 pub struct SepicApp {
+    // TODO: escribir lógica para hilo secundario
+    #[expect(unused)]
     rt: Runtime,
 
     available_ports: Vec<Rc<SerialPortInfo>>,
@@ -20,12 +29,16 @@ pub struct SepicApp {
     serial_port: Option<Box<dyn SerialPort>>,
     baudrate: u32,
 
-    duty_cycle: f32,
-    frequency: f32,
+    duty_cycle: Rc<f32>,
+    frequency: Rc<f32>,
 
     monitor_address: String,
     monitor_port: u32,
     monitor_connected: bool,
+
+    // TODO: escribir lógica para hilo secundario
+    #[expect(unused)]
+    meas_data: Arc<RwLock<BTreeMap<DateTime<Local>, f64>>>,
 
     error_modal: Option<AppError>,
     tree: DockState<MyTab>,
@@ -43,7 +56,17 @@ impl Default for SepicApp {
         //         }
         //     })
         // });
-        let mut tree = DockState::new(vec![MyTab::pwm_window(), MyTab::meas_window()]);
+
+        let frequency = Rc::new(60e3);
+        let duty_cycle = Rc::new(0.0);
+        let tspan = 100.0;
+
+        let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
+
+        let mut tree = DockState::new(vec![
+            MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
+            MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
+        ]);
         let [_, _] =
             tree.main_surface_mut()
                 .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
@@ -56,12 +79,14 @@ impl Default for SepicApp {
             serial_port: None,
             baudrate: 9600,
 
-            duty_cycle: 0.0,
-            frequency: 60e3,
+            duty_cycle,
+            frequency,
 
             monitor_address: "esp32-pelele.local".to_owned(),
             monitor_port: 4444,
             monitor_connected: false,
+
+            meas_data,
 
             tree,
             error_modal: None,
@@ -120,8 +145,8 @@ impl SepicApp {
     }
 
     fn update_settingsbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut prev_duty = self.duty_cycle;
-        let mut prev_freq = self.frequency;
+        let mut duty_cycle = *self.duty_cycle;
+        let mut frequency = *self.frequency;
 
         egui::SidePanel::left("Ajustes").show(ctx, |ui| {
             ui.heading("SEPIC");
@@ -134,8 +159,8 @@ impl SepicApp {
 
                 ui.separator();
 
-                prev_duty = self.duty_cycle;
-                prev_freq = self.frequency;
+                duty_cycle = *self.duty_cycle;
+                frequency = *self.frequency;
 
                 let mut ui_builder = egui::UiBuilder::new();
                 if self.serial_port.is_none() {
@@ -144,13 +169,13 @@ impl SepicApp {
 
                 ui.scope_builder(ui_builder, |ui| {
                     ui.add(
-                        egui::Slider::new(&mut self.duty_cycle, 0.0..=75.0)
+                        egui::Slider::new(&mut duty_cycle, 0.0..=75.0)
                             .text("(%) Duty cycle")
                             .update_while_editing(false)
                             .custom_formatter(|n, _| format!("{n:02.1}")),
                     );
                     ui.add(
-                        egui::Slider::new(&mut self.frequency, 60e3..=120e3)
+                        egui::Slider::new(&mut frequency, 60e3..=120e3)
                             .text("(kHz) Frecuencia")
                             .update_while_editing(false)
                             .custom_formatter(|n, _| {
@@ -169,7 +194,7 @@ impl SepicApp {
                     ui.label(
                         egui::RichText::new(format!(
                             "{:.2}",
-                            (24.0 * self.duty_cycle / 100.0) / (1.0 - (self.duty_cycle / 100.0))
+                            (24.0 * duty_cycle / 100.0) / (1.0 - (duty_cycle / 100.0))
                         ))
                         .font(FontId::new(40.0, FontFamily::Name("7-segment".into()))),
                     );
@@ -179,29 +204,34 @@ impl SepicApp {
         });
 
         if let Some(serial_port) = self.serial_port.as_mut() {
-            if prev_duty != self.duty_cycle {
+            if duty_cycle != *self.duty_cycle {
                 debug!("Actualizando ciclo de trabajo a {}", self.duty_cycle);
-                if (prev_duty - self.duty_cycle).abs() > 15.0 {
-                    ramp_duty(serial_port, prev_duty, self.duty_cycle, 1000).unwrap_or_else(|e| {
-                        error!("No se pudo actualizar el ciclo de trabajo: {e}");
-                        self.error_modal = Some(AppError::setting("duty cycle", &e));
-                    });
+                if (duty_cycle - *self.duty_cycle).abs() > 15.0 {
+                    ramp_duty(serial_port, duty_cycle, *self.duty_cycle, 1000).unwrap_or_else(
+                        |e| {
+                            error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                            self.error_modal = Some(AppError::setting("duty cycle", &e));
+                        },
+                    );
                 } else {
-                    set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
+                    set_duty(serial_port, *self.duty_cycle).unwrap_or_else(|e| {
                         error!("No se pudo actualizar el ciclo de trabajo: {e}");
                         self.error_modal = Some(AppError::setting("duty cycle", &e));
                     });
                 }
             }
 
-            if prev_freq != self.frequency {
+            if frequency != *self.frequency {
                 debug!("Actualizando frecuencia a {}", self.frequency);
-                set_frequency(serial_port, self.frequency).unwrap_or_else(|e| {
+                set_frequency(serial_port, *self.frequency).unwrap_or_else(|e| {
                     error!("No se pudo actualizar la frecuencia: {e}");
                     self.error_modal = Some(AppError::setting("frecuencia", &e));
                 });
             }
         }
+
+        self.duty_cycle = duty_cycle.into();
+        self.frequency = frequency.into();
     }
 
     fn update_serial_settings(&mut self, ui: &mut Ui) {
@@ -282,8 +312,8 @@ impl SepicApp {
             if let Some(port) = self.serial_port.as_mut() {
                 match attempt_handshake(port) {
                     Ok((freq, duty)) => {
-                        self.frequency = freq;
-                        self.duty_cycle = duty;
+                        self.frequency = freq.into();
+                        self.duty_cycle = duty.into();
                     }
                     Err(e) => {
                         error!("Falló el handshake con el dispositivo: {e:?}");
@@ -338,7 +368,7 @@ impl eframe::App for SepicApp {
         Self::update_menubar(ctx, _frame);
         self.update_settingsbar(ctx, _frame);
 
-        let mut viewer = MyTabViewer::new(self.frequency, self.duty_cycle, 100.0);
+        let mut viewer = MyTabViewer::new();
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))
