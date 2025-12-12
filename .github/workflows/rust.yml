@@ -62,7 +62,10 @@ jobs:
 
     - uses: actions/checkout@master
     - name: Install dependencies
-      run: sudo apt-get install libudev-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+      run: |
+          sudo sed -i 's/azure.archive.ubuntu.com/archive.ubuntu.com/' /etc/apt/sources.list
+          sudo apt-get -qq update
+          sudo apt-get -qq -y install build-essential curl git pkg-config libudev-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
     - run: rustup target add --toolchain stable ${{ matrix.TARGET }}
     - run: cargo build --verbose --release --target=${{ matrix.TARGET }}
     - name: Build archive
