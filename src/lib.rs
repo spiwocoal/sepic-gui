@@ -7,3 +7,5 @@ mod serialcomms;
 
 mod tabs;
 pub use tabs::MyTabViewer;
+
+pub mod threading;

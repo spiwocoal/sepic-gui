@@ -2,7 +2,10 @@ use std::{
     collections::BTreeMap,
     fmt,
     rc::Rc,
-    sync::{Arc, RwLock},
+    sync::{
+        Arc, RwLock,
+        mpsc::{Receiver, Sender},
+    },
     time::Duration,
 };
 
@@ -10,6 +13,7 @@ use crate::{
     MyTabViewer,
     serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
     tabs::MyTab,
+    threading::ThreadMessage,
 };
 use anyhow::Error;
 use chrono::{DateTime, Local, TimeDelta};
@@ -17,12 +21,10 @@ use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, Ri
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
-use tokio::runtime::Runtime;
 
 pub struct SepicApp {
-    // TODO: escribir lógica para hilo secundario
-    #[expect(unused)]
-    rt: Runtime,
+    rx: Receiver<ThreadMessage>,
+    tx: Sender<ThreadMessage>,
 
     available_ports: Vec<Rc<SerialPortInfo>>,
     port_info: Option<Rc<SerialPortInfo>>,
@@ -33,7 +35,7 @@ pub struct SepicApp {
     frequency: Rc<f32>,
 
     monitor_address: String,
-    monitor_port: u32,
+    monitor_port: u16,
     monitor_connected: bool,
 
     // TODO: escribir lógica para hilo secundario
@@ -44,58 +46,52 @@ pub struct SepicApp {
     tree: DockState<MyTab>,
 }
 
-impl Default for SepicApp {
-    fn default() -> Self {
-        let rt = Runtime::new().expect("No se pudo crear el Runtime de tokio");
-        // let _enter = rt.enter();
-        //
-        // std::thread::spawn(move || {
-        //     rt.block_on(async {
-        //         loop {
-        //             std::thread::sleep(Duration::from_secs(3600));
-        //         }
-        //     })
-        // });
-
-        let frequency = Rc::new(60e3);
-        let duty_cycle = Rc::new(0.0);
-        let tspan = 100.0;
-
-        let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
-
-        let mut tree = DockState::new(vec![
-            MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
-            MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
-        ]);
-        let [_, _] =
-            tree.main_surface_mut()
-                .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
-
-        Self {
-            rt,
-
-            available_ports: get_serial_ports(),
-            port_info: None,
-            serial_port: None,
-            baudrate: 9600,
-
-            duty_cycle,
-            frequency,
-
-            monitor_address: "esp32-pelele.local".to_owned(),
-            monitor_port: 4444,
-            monitor_connected: false,
-
-            meas_data,
-
-            tree,
-            error_modal: None,
-        }
-    }
-}
+// impl Default for SepicApp {
+//     fn default() -> Self {
+//         let frequency = Rc::new(60e3);
+//         let duty_cycle = Rc::new(0.0);
+//         let tspan = 100.0;
+//
+//         let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
+//
+//         let mut tree = DockState::new(vec![
+//             MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
+//             MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
+//         ]);
+//         let [_, _] =
+//             tree.main_surface_mut()
+//                 .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
+//
+//         Self {
+//             rx,
+//             tx,
+//
+//             available_ports: get_serial_ports(),
+//             port_info: None,
+//             serial_port: None,
+//             baudrate: 9600,
+//
+//             duty_cycle,
+//             frequency,
+//
+//             monitor_address: "esp32-pelele.local".to_owned(),
+//             monitor_port: 4444,
+//             monitor_connected: false,
+//
+//             meas_data,
+//
+//             tree,
+//             error_modal: None,
+//         }
+//     }
+// }
 
 impl SepicApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        rx: Receiver<ThreadMessage>,
+        tx: Sender<ThreadMessage>,
+    ) -> Self {
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert(
             "7-segment".to_owned(),
@@ -120,7 +116,41 @@ impl SepicApp {
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_zoom_factor(1.5);
 
-        Default::default()
+        let frequency = Rc::new(60e3);
+        let duty_cycle = Rc::new(0.0);
+        let tspan = 100.0;
+
+        let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
+
+        let mut tree = DockState::new(vec![
+            MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
+            MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
+        ]);
+        let [_, _] =
+            tree.main_surface_mut()
+                .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
+
+        Self {
+            rx,
+            tx,
+
+            available_ports: get_serial_ports(),
+            port_info: None,
+            serial_port: None,
+            baudrate: 9600,
+
+            duty_cycle,
+            frequency,
+
+            monitor_address: "esp32-pelele.local".to_owned(),
+            monitor_port: 4444,
+            monitor_connected: false,
+
+            meas_data,
+
+            tree,
+            error_modal: None,
+        }
     }
 
     fn update_serial_ports(&mut self) {
@@ -347,9 +377,22 @@ impl SepicApp {
             });
 
             if !self.monitor_connected && (enter_pressed || ui.button("Conectar").clicked()) {
-                self.monitor_connected = true;
-                // TODO: realizar conexión a monitor mediante
-                // un nuevo hilo
+                // TODO: agregar manejo de errores
+                #[expect(clippy::unwrap_used)]
+                self.tx
+                    .send(ThreadMessage::StartConnection {
+                        address: self.monitor_address.clone(),
+                        port: self.monitor_port,
+                    })
+                    .unwrap();
+
+                if let Ok(ThreadMessage::Ack) = self.rx.recv_timeout(Duration::from_millis(100)) {
+                    self.monitor_connected = true;
+                    debug!("Conexión realizada con el dispositivo");
+                } else {
+                    self.monitor_connected = false;
+                    debug!("No se pudo realizar la conexión con el dispositivo");
+                }
             } else if self.monitor_connected && ui.button("Desconectar").clicked() {
                 self.monitor_connected = false;
                 // TODO: realizar desconexión mediante comunicación
