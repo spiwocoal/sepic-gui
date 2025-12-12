@@ -1,10 +1,42 @@
+use anyhow::anyhow;
 use chrono::{DateTime, Local, TimeDelta};
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, RwLock},
-};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc, str::FromStr};
 
 use egui_plot::{Line, Plot, PlotPoints};
+
+pub struct Measurement {
+    pub timestamp: DateTime<Local>,
+    pub value: f64,
+}
+
+impl Default for Measurement {
+    fn default() -> Self {
+        Self {
+            timestamp: Local::now(),
+            value: 0.0,
+        }
+    }
+}
+
+impl FromStr for Measurement {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (tstamp, value) = s.split_once(' ').ok_or(anyhow!("ParseMeasurementError"))?;
+
+        let tstamp_fromstr = tstamp
+            .parse::<DateTime<Local>>()
+            .map_err(|e| anyhow!("ParseMeasurementError: {e}"))?;
+        let value_fromstr = value
+            .parse::<f64>()
+            .map_err(|e| anyhow!("ParseMeasurementError: {e}"))?;
+
+        Ok(Self {
+            timestamp: tstamp_fromstr,
+            value: value_fromstr,
+        })
+    }
+}
 
 pub struct MeasPlot;
 
@@ -21,23 +53,22 @@ impl MeasPlot {
         "Monitor de salida".into()
     }
 
-    pub fn ui(
-        ui: &mut egui::Ui,
-        data: &Arc<RwLock<BTreeMap<DateTime<Local>, f64>>>,
-        tspan: TimeDelta,
-    ) {
-        let now = Local::now();
+    pub fn ui(ui: &mut egui::Ui, data: &Rc<RefCell<VecDeque<Measurement>>>, tspan: TimeDelta) {
+        let fallback_measurement = Measurement::default();
+        let data = data.borrow();
 
-        // TODO: agregar manejo de errores
-        #[expect(clippy::unwrap_used)]
-        let data = data.read().unwrap();
-        let (last_tstamp, _last_sample) = data.last_key_value().unwrap_or((&now, &0.0));
-        let first_tstamp = *last_tstamp - tspan;
+        let last_measurement = data.back().unwrap_or(&fallback_measurement);
+        let first_tstamp = last_measurement.timestamp - tspan;
 
         let points: PlotPoints<'_> = data
             .iter()
-            .filter(|&(&tstamp, _)| tstamp > first_tstamp)
-            .map(|(tstamp, value)| [tstamp.timestamp_micros() as f64, *value])
+            .filter(|&measurement| measurement.timestamp > first_tstamp)
+            .map(|measurement| {
+                [
+                    measurement.timestamp.timestamp_micros() as f64,
+                    measurement.value,
+                ]
+            })
             .collect();
 
         let line = Line::new("vo", points);

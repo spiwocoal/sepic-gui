@@ -1,22 +1,20 @@
 use std::{
-    collections::BTreeMap,
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
     fmt,
     rc::Rc,
-    sync::{
-        Arc, RwLock,
-        mpsc::{Receiver, Sender},
-    },
+    sync::mpsc::{Receiver, Sender, TryRecvError},
     time::Duration,
 };
 
 use crate::{
     MyTabViewer,
     serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
-    tabs::MyTab,
+    tabs::{Measurement, MyTab},
     threading::ThreadMessage,
 };
-use anyhow::Error;
-use chrono::{DateTime, Local, TimeDelta};
+use anyhow::{Error, Result};
+use chrono::TimeDelta;
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, RichText, Ui};
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
@@ -38,59 +36,19 @@ pub struct SepicApp {
     monitor_port: u16,
     monitor_connected: bool,
 
-    // TODO: escribir lógica para hilo secundario
-    #[expect(unused)]
-    meas_data: Arc<RwLock<BTreeMap<DateTime<Local>, f64>>>,
+    meas_data: Rc<RefCell<VecDeque<Measurement>>>,
 
     error_modal: Option<AppError>,
     tree: DockState<MyTab>,
 }
 
-// impl Default for SepicApp {
-//     fn default() -> Self {
-//         let frequency = Rc::new(60e3);
-//         let duty_cycle = Rc::new(0.0);
-//         let tspan = 100.0;
-//
-//         let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
-//
-//         let mut tree = DockState::new(vec![
-//             MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
-//             MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
-//         ]);
-//         let [_, _] =
-//             tree.main_surface_mut()
-//                 .split_below(NodeIndex::root(), 0.75, vec![MyTab::log_window()]);
-//
-//         Self {
-//             rx,
-//             tx,
-//
-//             available_ports: get_serial_ports(),
-//             port_info: None,
-//             serial_port: None,
-//             baudrate: 9600,
-//
-//             duty_cycle,
-//             frequency,
-//
-//             monitor_address: "esp32-pelele.local".to_owned(),
-//             monitor_port: 4444,
-//             monitor_connected: false,
-//
-//             meas_data,
-//
-//             tree,
-//             error_modal: None,
-//         }
-//     }
-// }
-
 impl SepicApp {
+    const MAX_SAMPLES: usize = 1000;
+
     pub fn new(
         cc: &eframe::CreationContext<'_>,
-        rx: Receiver<ThreadMessage>,
         tx: Sender<ThreadMessage>,
+        rx: Receiver<ThreadMessage>,
     ) -> Self {
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert(
@@ -120,11 +78,11 @@ impl SepicApp {
         let duty_cycle = Rc::new(0.0);
         let tspan = 100.0;
 
-        let meas_data = Arc::new(RwLock::new(BTreeMap::new()));
+        let meas_data = Rc::new(RefCell::new(VecDeque::with_capacity(Self::MAX_SAMPLES)));
 
         let mut tree = DockState::new(vec![
             MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
-            MyTab::meas_window(Arc::clone(&meas_data), TimeDelta::minutes(5)),
+            MyTab::meas_window(Rc::clone(&meas_data), TimeDelta::minutes(5)),
         ]);
         let [_, _] =
             tree.main_surface_mut()
@@ -159,6 +117,34 @@ impl SepicApp {
 }
 
 impl SepicApp {
+    fn poll_messages(&mut self) -> Result<()> {
+        let mut message = ThreadMessage::None;
+        match self.rx.try_recv() {
+            Ok(msg) => message = msg,
+            Err(e) => {
+                if matches!(e, TryRecvError::Disconnected) {
+                    return Err(e.into());
+                }
+            }
+        }
+
+        match message {
+            ThreadMessage::ConnectionEstablished => {
+                self.monitor_connected = true;
+            }
+            ThreadMessage::Data(measurement) => {
+                let mut data = self.meas_data.borrow_mut();
+                if data.len() == Self::MAX_SAMPLES {
+                    data.pop_front();
+                }
+                data.push_back(measurement);
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     fn update_menubar(ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -377,26 +363,19 @@ impl SepicApp {
             });
 
             if !self.monitor_connected && (enter_pressed || ui.button("Conectar").clicked()) {
-                // TODO: agregar manejo de errores
-                #[expect(clippy::unwrap_used)]
                 self.tx
                     .send(ThreadMessage::StartConnection {
                         address: self.monitor_address.clone(),
                         port: self.monitor_port,
                     })
-                    .unwrap();
-
-                if let Ok(ThreadMessage::Ack) = self.rx.recv_timeout(Duration::from_millis(100)) {
-                    self.monitor_connected = true;
-                    debug!("Conexión realizada con el dispositivo");
-                } else {
-                    self.monitor_connected = false;
-                    debug!("No se pudo realizar la conexión con el dispositivo");
-                }
+                    .unwrap_or_else(|e| {
+                        error!("Error en la comunicación con el hilo auxiliar: {e}");
+                    });
             } else if self.monitor_connected && ui.button("Desconectar").clicked() {
+                self.tx.send(ThreadMessage::Disconnect).unwrap_or_else(|e| {
+                    error!("Error en la comunicación con el hilo auxiliar: {e}");
+                });
                 self.monitor_connected = false;
-                // TODO: realizar desconexión mediante comunicación
-                // con hilo de comunicación con monitor
             }
         });
     }
@@ -404,6 +383,10 @@ impl SepicApp {
 
 impl eframe::App for SepicApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_messages().unwrap_or_else(|e| {
+            error!("Error al hacer polling a los mensajes del hilo auxiliar: {e}");
+        });
+
         if self.serial_port.is_none() {
             self.port_info = None;
         }

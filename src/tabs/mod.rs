@@ -1,15 +1,12 @@
-use std::{
-    collections::BTreeMap,
-    rc::Rc,
-    sync::{Arc, RwLock},
-};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 mod pwm_plot;
-use chrono::{DateTime, Local, TimeDelta};
+use chrono::TimeDelta;
 use pwm_plot::PWMPlot;
 
 mod meas_plot;
 use meas_plot::MeasPlot;
+pub use meas_plot::Measurement;
 
 mod logger;
 use logger::LogConsole;
@@ -61,7 +58,7 @@ pub enum MyTab {
         tspan: f64,
     },
     MeasPlot {
-        data: Arc<RwLock<BTreeMap<DateTime<Local>, f64>>>,
+        data: Rc<RefCell<VecDeque<Measurement>>>,
         tspan: TimeDelta,
     },
     LogConsole,
@@ -76,10 +73,7 @@ impl MyTab {
         }
     }
 
-    pub fn meas_window(
-        data: Arc<RwLock<BTreeMap<DateTime<Local>, f64>>>,
-        tspan: TimeDelta,
-    ) -> Self {
+    pub fn meas_window(data: Rc<RefCell<VecDeque<Measurement>>>, tspan: TimeDelta) -> Self {
         Self::MeasPlot { data, tspan }
     }
 
