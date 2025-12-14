@@ -1,5 +1,6 @@
 [package]
 name = "sepic-gui"
+default-run = "sepic-gui"
 version = "0.1.0"
 authors = ["Bruno Pacheco <brpacheco2022@udec.cl>"]
 edition = "2024"
@@ -31,7 +32,7 @@ egui_plot = "0.34.0"
 egui_logger = "0.9.0"
 multi_log = "0.1.2"
 thiserror = "2.0.17"
-tokio = { version = "1.48.0", features = ["net", "rt", "rt-multi-thread"] }
+tokio = { version = "1.48.0", features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 chrono = "0.4.42"
 
 # native:

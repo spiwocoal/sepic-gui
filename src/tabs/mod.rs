@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 mod pwm_plot;
 use chrono::TimeDelta;
@@ -6,7 +6,7 @@ use pwm_plot::PWMPlot;
 
 mod meas_plot;
 use meas_plot::MeasPlot;
-pub use meas_plot::Measurement;
+pub use meas_plot::{Measurement, MeasurementRaw, Samples};
 
 mod logger;
 use logger::LogConsole;
@@ -58,7 +58,7 @@ pub enum MyTab {
         tspan: f64,
     },
     MeasPlot {
-        data: Rc<RefCell<VecDeque<Measurement>>>,
+        data: Rc<RefCell<Samples>>,
         tspan: TimeDelta,
     },
     LogConsole,
@@ -73,7 +73,7 @@ impl MyTab {
         }
     }
 
-    pub fn meas_window(data: Rc<RefCell<VecDeque<Measurement>>>, tspan: TimeDelta) -> Self {
+    pub fn meas_window(data: Rc<RefCell<Samples>>, tspan: TimeDelta) -> Self {
         Self::MeasPlot { data, tspan }
     }
 

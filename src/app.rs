@@ -1,16 +1,9 @@
-use std::{
-    cell::RefCell,
-    collections::{BTreeMap, VecDeque},
-    fmt,
-    rc::Rc,
-    sync::mpsc::{Receiver, Sender, TryRecvError},
-    time::Duration,
-};
+use std::{cell::RefCell, collections::BTreeMap, fmt, rc::Rc, sync::Arc, time::Duration};
 
 use crate::{
     MyTabViewer,
     serialcomms::{attempt_handshake, get_serial_ports, ramp_duty, set_duty, set_frequency},
-    tabs::{Measurement, MyTab},
+    tabs::{MyTab, Samples},
     threading::ThreadMessage,
 };
 use anyhow::{Error, Result};
@@ -19,6 +12,10 @@ use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, Ri
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use log::{debug, error};
 use serialport::{SerialPort, SerialPortInfo};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
+
+type Receiver<T> = UnboundedReceiver<T>;
+type Sender<T> = UnboundedSender<T>;
 
 pub struct SepicApp {
     rx: Receiver<ThreadMessage>,
@@ -36,14 +33,14 @@ pub struct SepicApp {
     monitor_port: u16,
     monitor_connected: bool,
 
-    meas_data: Rc<RefCell<VecDeque<Measurement>>>,
+    meas_data: Rc<RefCell<Samples>>,
 
     error_modal: Option<AppError>,
     tree: DockState<MyTab>,
 }
 
 impl SepicApp {
-    const MAX_SAMPLES: usize = 1000;
+    const MAX_SAMPLES: usize = 10000;
 
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -78,7 +75,7 @@ impl SepicApp {
         let duty_cycle = Rc::new(0.0);
         let tspan = 100.0;
 
-        let meas_data = Rc::new(RefCell::new(VecDeque::with_capacity(Self::MAX_SAMPLES)));
+        let meas_data = Rc::new(RefCell::new(Samples::new()));
 
         let mut tree = DockState::new(vec![
             MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
@@ -117,7 +114,7 @@ impl SepicApp {
 }
 
 impl SepicApp {
-    fn poll_messages(&mut self) -> Result<()> {
+    fn poll_messages(&mut self, ctx: &egui::Context) -> Result<()> {
         let mut message = ThreadMessage::None;
         match self.rx.try_recv() {
             Ok(msg) => message = msg,
@@ -131,13 +128,26 @@ impl SepicApp {
         match message {
             ThreadMessage::ConnectionEstablished => {
                 self.monitor_connected = true;
+                let mut data = self.meas_data.borrow_mut();
+                data.push_collection();
+            }
+            ThreadMessage::Disconnect => {
+                self.tx.send(ThreadMessage::Disconnect).unwrap_or_else(|_| {
+                    error!("Ocurrió un problema al utililzar el canal");
+                });
+                self.monitor_connected = false;
+                error!("Se perdió la conexión con el dipositivo");
+                self.error_modal = Some(AppError::monitor(self.monitor_address.as_str()));
             }
             ThreadMessage::Data(measurement) => {
                 let mut data = self.meas_data.borrow_mut();
+
                 if data.len() == Self::MAX_SAMPLES {
                     data.pop_front();
                 }
                 data.push_back(measurement);
+
+                ctx.request_repaint();
             }
             _ => {}
         }
@@ -367,6 +377,7 @@ impl SepicApp {
                     .send(ThreadMessage::StartConnection {
                         address: self.monitor_address.clone(),
                         port: self.monitor_port,
+                        ctx: Arc::new(ui.ctx().clone()),
                     })
                     .unwrap_or_else(|e| {
                         error!("Error en la comunicación con el hilo auxiliar: {e}");
@@ -383,7 +394,7 @@ impl SepicApp {
 
 impl eframe::App for SepicApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_messages().unwrap_or_else(|e| {
+        self.poll_messages(ctx).unwrap_or_else(|e| {
             error!("Error al hacer polling a los mensajes del hilo auxiliar: {e}");
         });
 
@@ -417,6 +428,15 @@ impl eframe::App for SepicApp {
             }
         }
     }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.tx.send(ThreadMessage::Disconnect).unwrap_or_else(|e| {
+            error!("Error en la comunicación con el hilo auxiliar: {e}");
+        });
+        self.tx.send(ThreadMessage::Shutdown).unwrap_or_else(|e| {
+            error!("Error en la comunicación con el hilo auxiliar: {e}");
+        });
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -436,6 +456,13 @@ impl AppError {
         Self {
             description: format!("No se pudo abrir el puerto `{port}`"),
             source_description: error.to_string(),
+        }
+    }
+
+    pub fn monitor(address: &str) -> Self {
+        Self {
+            description: format!("Se perdió la conexión con el dispositivo `{address}`"),
+            source_description: "El dispositvo tardó más de 5 segundos en enviar un dato".into(),
         }
     }
 

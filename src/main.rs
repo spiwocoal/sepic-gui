@@ -1,9 +1,14 @@
 #![warn(clippy::all, rust_2018_idioms)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use log::error;
-use std::sync::{mpsc, mpsc::Receiver, mpsc::Sender};
+use std::time::Duration;
+
+use log::{debug, error};
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+type Receiver<T> = UnboundedReceiver<T>;
+type Sender<T> = UnboundedSender<T>;
 
 use sepic_gui::threading::{MessagingThread, ThreadMessage};
 
@@ -11,21 +16,31 @@ fn main() -> eframe::Result {
     let rt = Runtime::new().expect("No se pudo crear el Runtime para Tokio");
     let _enter = rt.enter();
 
-    let (tx1, rx1): (Sender<ThreadMessage>, Receiver<ThreadMessage>) = mpsc::channel();
-    let (tx2, rx2): (Sender<ThreadMessage>, Receiver<ThreadMessage>) = mpsc::channel();
+    let (tx1, rx1): (Sender<ThreadMessage>, Receiver<ThreadMessage>) = mpsc::unbounded_channel();
+    let (tx2, rx2): (Sender<ThreadMessage>, Receiver<ThreadMessage>) = mpsc::unbounded_channel();
 
     std::thread::Builder::new()
         .name("async_thread".to_owned())
-        .spawn(move || -> ! {
+        .spawn(move || {
             let mut thread_state = MessagingThread::new(rx1, tx2);
 
             rt.block_on(async move {
                 loop {
-                    thread_state.poll_messages().await.unwrap_or_else(|e| {
-                        error!("Error en la comunicación entre hilos: {e}");
-                    });
+                    match thread_state.poll_messages().await {
+                        Ok(should_shutdown) if should_shutdown => {
+                            debug!("Apagando el hilo auxiliar");
+                            drop(thread_state);
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error en la comunicación entre hilos: {e}");
+                        }
+                    }
                 }
-            })
+            });
+            rt.shutdown_timeout(Duration::from_secs(5));
+            debug!("Hilo auxiliar apagado");
         })
         .expect("Error al crear el hilo para comunicación");
 
