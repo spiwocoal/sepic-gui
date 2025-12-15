@@ -33,6 +33,14 @@ impl Samples {
     pub fn len(&self) -> usize {
         self.data.iter().map(|v| v.len()).sum()
     }
+
+    pub fn back(&self) -> Option<&Measurement> {
+        if let Some(back) = self.data.back() {
+            return back.back();
+        }
+
+        return None;
+    }
 }
 
 pub struct MeasurementRaw {
@@ -106,7 +114,13 @@ impl MeasPlot {
         "Monitor de salida".into()
     }
 
-    pub fn ui(ui: &mut egui::Ui, data: &Rc<RefCell<Samples>>, tspan: TimeDelta) {
+    pub fn ui(
+        ui: &mut egui::Ui,
+        data: &Rc<RefCell<Samples>>,
+        resistor_1: f64,
+        resistor_2: f64,
+        tspan: TimeDelta,
+    ) {
         let fallback_collection = VecDeque::new();
         let fallback_measurement = Measurement::default();
         let data = &data.borrow().data;
@@ -117,6 +131,8 @@ impl MeasPlot {
             .back()
             .unwrap_or(&fallback_measurement);
         let first_tstamp = last_measurement.timestamp - tspan;
+
+        let divider_ratio = resistor_2 / (resistor_1 + resistor_2);
 
         let x_grid = |input: GridInput| {
             let mut marks: Vec<GridMark> = vec![];
@@ -163,7 +179,7 @@ impl MeasPlot {
                             [
                                 (last_measurement.timestamp - measurement.timestamp)
                                     .num_milliseconds() as f64,
-                                20.0 * measurement.value,
+                                measurement.value / divider_ratio,
                             ]
                         })
                         .collect::<PlotPoints<'_>>(),

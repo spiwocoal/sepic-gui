@@ -11,12 +11,22 @@ pub use meas_plot::{Measurement, MeasurementRaw, Samples};
 mod logger;
 use logger::LogConsole;
 
-pub struct MyTabViewer {}
+pub struct MyTabViewer {
+    frequency: f32,
+    duty_cycle: f32,
+    resistor_1: f64,
+    resistor_2: f64,
+}
 
 impl MyTabViewer {
     #[expect(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(frequency: f32, duty_cycle: f32, resistor_1: f64, resistor_2: f64) -> Self {
+        Self {
+            frequency,
+            duty_cycle,
+            resistor_1,
+            resistor_2,
+        }
     }
 }
 
@@ -33,12 +43,10 @@ impl egui_dock::TabViewer for MyTabViewer {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         match tab {
-            MyTab::PWMPlot {
-                frequency,
-                duty_cycle,
-                tspan,
-            } => PWMPlot::ui(ui, **frequency, **duty_cycle, *tspan),
-            MyTab::MeasPlot { data, tspan } => MeasPlot::ui(ui, data, *tspan),
+            MyTab::PWMPlot { tspan } => PWMPlot::ui(ui, self.frequency, self.duty_cycle, *tspan),
+            MyTab::MeasPlot { data, tspan } => {
+                MeasPlot::ui(ui, data, self.resistor_1, self.resistor_2, *tspan)
+            }
             MyTab::LogConsole => LogConsole::ui(ui),
         }
     }
@@ -53,8 +61,6 @@ impl egui_dock::TabViewer for MyTabViewer {
 
 pub enum MyTab {
     PWMPlot {
-        frequency: Rc<f32>,
-        duty_cycle: Rc<f32>,
         tspan: f64,
     },
     MeasPlot {
@@ -65,12 +71,8 @@ pub enum MyTab {
 }
 
 impl MyTab {
-    pub fn pwm_window(frequency: Rc<f32>, duty_cycle: Rc<f32>, tspan: f64) -> Self {
-        Self::PWMPlot {
-            frequency,
-            duty_cycle,
-            tspan,
-        }
+    pub fn pwm_window(tspan: f64) -> Self {
+        Self::PWMPlot { tspan }
     }
 
     pub fn meas_window(data: Rc<RefCell<Samples>>, tspan: TimeDelta) -> Self {

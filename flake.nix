@@ -5,7 +5,6 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
-    esp-dev.url = "github:mirrexagon/nixpkgs-esp-dev";
   };
 
   outputs = {
@@ -13,16 +12,12 @@
     nixpkgs,
     rust-overlay,
     flake-utils,
-    esp-dev,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (system: let
-      overlays = [(import rust-overlay) esp-dev.outputs.overlays.default];
+      overlays = [(import rust-overlay)];
       pkgs = import nixpkgs {
         inherit system overlays;
-        config.permittedInsecurePackages = [
-          "python3.13-ecdsa-0.19.1"
-        ];
       };
     in
       with pkgs; {
@@ -56,8 +51,6 @@
             systemdLibs
 
             gdb
-
-            esp-idf-full
 
             # Python
             python3

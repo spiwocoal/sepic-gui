@@ -26,14 +26,17 @@ pub struct SepicApp {
     serial_port: Option<Box<dyn SerialPort>>,
     baudrate: u32,
 
-    duty_cycle: Rc<f32>,
-    frequency: Rc<f32>,
+    duty_cycle: f32,
+    frequency: f32,
 
     monitor_address: String,
     monitor_port: u16,
     monitor_connected: bool,
 
     meas_data: Rc<RefCell<Samples>>,
+
+    resistor_1: f64,
+    resistor_2: f64,
 
     error_modal: Option<AppError>,
     tree: DockState<MyTab>,
@@ -71,14 +74,17 @@ impl SepicApp {
         cc.egui_ctx.set_fonts(fonts);
         cc.egui_ctx.set_zoom_factor(1.5);
 
-        let frequency = Rc::new(60e3);
-        let duty_cycle = Rc::new(0.0);
+        let frequency = 60e3;
+        let duty_cycle = 0.0;
         let tspan = 100.0;
 
         let meas_data = Rc::new(RefCell::new(Samples::new()));
 
+        let resistor_1 = 100e3;
+        let resistor_2 = resistor_1 / (20f64 - 1f64);
+
         let mut tree = DockState::new(vec![
-            MyTab::pwm_window(Rc::clone(&frequency), Rc::clone(&duty_cycle), tspan),
+            MyTab::pwm_window(tspan),
             MyTab::meas_window(Rc::clone(&meas_data), TimeDelta::minutes(5)),
         ]);
         let [_, _] =
@@ -102,6 +108,9 @@ impl SepicApp {
             monitor_connected: false,
 
             meas_data,
+
+            resistor_1,
+            resistor_2,
 
             tree,
             error_modal: None,
@@ -171,8 +180,8 @@ impl SepicApp {
     }
 
     fn update_settingsbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut duty_cycle = *self.duty_cycle;
-        let mut frequency = *self.frequency;
+        let mut duty_cycle = self.duty_cycle.clone();
+        let mut frequency = self.frequency.clone();
 
         egui::SidePanel::left("Ajustes").show(ctx, |ui| {
             ui.heading("SEPIC");
@@ -185,8 +194,8 @@ impl SepicApp {
 
                 ui.separator();
 
-                duty_cycle = *self.duty_cycle;
-                frequency = *self.frequency;
+                duty_cycle = self.duty_cycle;
+                frequency = self.frequency;
 
                 let mut ui_builder = egui::UiBuilder::new();
                 if self.serial_port.is_none() {
@@ -215,14 +224,31 @@ impl SepicApp {
                 ui.separator();
                 ui.add_space(ui.available_height() - 60.0);
 
-                ui.label(egui::RichText::new("Voltaje de salida esperado").heading());
+                let data = self.meas_data.borrow();
+                let last_sample = data.back();
+                let divider_ratio = self.resistor_2 / (self.resistor_1 + self.resistor_2);
+
+                let last_measurement = if let Some(meas) = last_sample {
+                    meas.value / divider_ratio
+                } else {
+                    ((24.0 * duty_cycle / 100.0) / (1.0 - (duty_cycle / 100.0))).into()
+                };
+
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Voltaje de salida ({})",
+                        if self.monitor_connected {
+                            "medido"
+                        } else {
+                            "esperado"
+                        }
+                    ))
+                    .heading(),
+                );
                 ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(format!(
-                            "{:.2}",
-                            (24.0 * duty_cycle / 100.0) / (1.0 - (duty_cycle / 100.0))
-                        ))
-                        .font(FontId::new(40.0, FontFamily::Name("7-segment".into()))),
+                        egui::RichText::new(format!("{:.2}", last_measurement))
+                            .font(FontId::new(40.0, FontFamily::Name("7-segment".into()))),
                     );
                     ui.label(egui::RichText::new("V").size(35.0).monospace());
                 });
@@ -230,34 +256,32 @@ impl SepicApp {
         });
 
         if let Some(serial_port) = self.serial_port.as_mut() {
-            if duty_cycle != *self.duty_cycle {
+            if duty_cycle != self.duty_cycle {
                 debug!("Actualizando ciclo de trabajo a {}", self.duty_cycle);
-                if (duty_cycle - *self.duty_cycle).abs() > 15.0 {
-                    ramp_duty(serial_port, duty_cycle, *self.duty_cycle, 1000).unwrap_or_else(
-                        |e| {
-                            error!("No se pudo actualizar el ciclo de trabajo: {e}");
-                            self.error_modal = Some(AppError::setting("duty cycle", &e));
-                        },
-                    );
+                if (duty_cycle - self.duty_cycle).abs() > 15.0 {
+                    ramp_duty(serial_port, duty_cycle, self.duty_cycle, 1000).unwrap_or_else(|e| {
+                        error!("No se pudo actualizar el ciclo de trabajo: {e}");
+                        self.error_modal = Some(AppError::setting("duty cycle", &e));
+                    });
                 } else {
-                    set_duty(serial_port, *self.duty_cycle).unwrap_or_else(|e| {
+                    set_duty(serial_port, self.duty_cycle).unwrap_or_else(|e| {
                         error!("No se pudo actualizar el ciclo de trabajo: {e}");
                         self.error_modal = Some(AppError::setting("duty cycle", &e));
                     });
                 }
             }
 
-            if frequency != *self.frequency {
+            if frequency != self.frequency {
                 debug!("Actualizando frecuencia a {}", self.frequency);
-                set_frequency(serial_port, *self.frequency).unwrap_or_else(|e| {
+                set_frequency(serial_port, self.frequency).unwrap_or_else(|e| {
                     error!("No se pudo actualizar la frecuencia: {e}");
                     self.error_modal = Some(AppError::setting("frecuencia", &e));
                 });
             }
         }
 
-        self.duty_cycle = duty_cycle.into();
-        self.frequency = frequency.into();
+        self.duty_cycle = duty_cycle;
+        self.frequency = frequency;
     }
 
     fn update_serial_settings(&mut self, ui: &mut Ui) {
@@ -388,6 +412,43 @@ impl SepicApp {
                 });
                 self.monitor_connected = false;
             }
+
+            ui.separator();
+
+            ui.collapsing("Divisor de voltaje", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("R1");
+                    ui.add(
+                        egui::DragValue::new(&mut self.resistor_1)
+                            .speed(1)
+                            .custom_formatter(|n, _| {
+                                if n < 1000.0 {
+                                    return format!("{:.03}", n / 1000.0);
+                                } else {
+                                    return format!("{:.01}", n / 1000.0);
+                                }
+                            })
+                            .custom_parser(|s| s.parse::<f64>().map(|n| n * 1000.0).ok()),
+                    );
+                    ui.label("kΩ");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("R2");
+                    ui.add(
+                        egui::DragValue::new(&mut self.resistor_2)
+                            .speed(1)
+                            .custom_formatter(|n, _| {
+                                if n < 1000.0 {
+                                    return format!("{:.03}", n / 1000.0);
+                                } else {
+                                    return format!("{:.01}", n / 1000.0);
+                                }
+                            })
+                            .custom_parser(|s| s.parse::<f64>().map(|n| n * 1000.0).ok()),
+                    );
+                    ui.label("kΩ");
+                });
+            });
         });
     }
 }
@@ -405,7 +466,12 @@ impl eframe::App for SepicApp {
         Self::update_menubar(ctx, _frame);
         self.update_settingsbar(ctx, _frame);
 
-        let mut viewer = MyTabViewer::new();
+        let mut viewer = MyTabViewer::new(
+            self.frequency,
+            self.duty_cycle,
+            self.resistor_1,
+            self.resistor_2,
+        );
 
         DockArea::new(&mut self.tree)
             .style(Style::from_egui(ctx.style().as_ref()))

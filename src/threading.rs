@@ -136,6 +136,7 @@ impl MessagingThread {
                             let sock = UdpSocket::bind("0.0.0.0:0").await?;
                             debug!("Socket creado {sock:?}");
 
+                            sock.send_to(b"END", remote_addr).await?;
                             sock.send_to(b"START", remote_addr).await?;
 
                             self.connection = Some(Connection::new(remote_addr, sock));
